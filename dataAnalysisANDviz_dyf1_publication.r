@@ -260,8 +260,8 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
     # convert names to gene names available in microarray data 
     set1_gnames[set1_gnames %in% 
                   setdiff(set1_gnames, 
-                          dyf1_marrayTab$SYMBOL) ] <- c("F42A10.3","MTCE.31",
-      "F35E12.6","F33A8.4","C18E9.4","F20G2.1","F20G2.2", "Y50D4B.4")
+                          dyf1_marrayTab$SYMBOL) ] <- c("F42A10.3","COX2",
+      "CELE_F35E12.6","F33A8.4","C18E9.4","CELE_F20G2.1","CELE_F20G2.2", "Y50D4B.4")
     # select genes of interest from Microarray table
     # note that "MTCE.31","F35E12.6","F20G2.1","F20G2.2" are not available in microarray
     XX <- MAexprdata[ match( dyf1_marrayTab$PROBEID[ 
@@ -284,7 +284,148 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
   
   }
   
-
+### Figure 4. a) GSEA pathway analysis
+  {
+  ### extract neuronal system R-CEL-112316 and sensory perception R-CEL-9709957
+  {
+    library( data.tree)
+    library( DiagrammeR )
+    
+    # load pathway hirerarchy
+    react_hire <- read.table( paste( wdir, "ReactomePathwaysRelation.txt" , sep = ""), 
+                              header = F,  sep = "\t")
+    react_select <- react_hire[grep("R-CEL" , react_hire$V1 ),]
+    
+    # extract neuronal system tree
+    name1 <- "R-CEL-112316"
+    indexNS <- numeric()
+    while( !isEmpty( name1 )){
+      indexNS <- c( indexNS , which(  react_select$V1%in% name1 ))
+      name1 <-  react_select$V2[ react_select$V1%in% name1]
+    }
+    react_NS <- react_select[ indexNS , ]
+    # tree view
+    react_NS_tree <- FromDataFrameNetwork( react_NS ) 
+    
+    # extract sensory perception tree
+    name1 <- "R-CEL-9709957"
+    indexSP <- numeric()
+    while( !isEmpty( name1 )){
+      indexSP <- c( indexSP , which(  react_select$V1%in% name1 ))
+      name1 <-  react_select$V2[ react_select$V1%in% name1]
+    }
+    react_SP <- react_select[ indexSP , ]
+    # tree view
+    react_SP_tree <- FromDataFrameNetwork( react_SP ) 
+    
+    # convert paths IDs 
+    React_pathID <- read.table( paste( wdir, "ReactomePathways.txt" , sep = ""), 
+                                header = F,  sep = "\t", quote = "")
+    
+    # get reactome IDs of SP and NS pathways
+    react_SP.NS <- unique( c(react_SP$V1,react_SP$V2, react_NS$V1 , react_NS$V2 ))
+    
+  }  
+  
+  
+  ### perform GSEA analysis with reactomePA
+  {
+    
+    library( ReactomePA )
+    library(enrichplot)
+    options(connectionObserver = NULL)
+    
+    # get ranked list of genes
+    x <- dyf1_marrayTab
+    x <- merge( x, tx2gene , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
+    x <- aggregate( list( logFC= x$logFC , P.Value=x$P.Value), by= list(entrezgene_id=x$entrezgene_id) , mean)
+    dyf1_marrayLFC <- setNames(x$logFC,x$entrezgene_id)
+    dyf1_marrayLFC <- dyf1_marrayLFC[order(-dyf1_marrayLFC)]
+    
+    # perform GSEA
+    path_REACT_GSEA <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="none",
+                                   pvalueCutoff = 0.05 , minGSSize = 1 )
+    
+    # get a list of all fdr-corrected significant pathways for visualisation
+    path_REACT_GSEAfdr0.01 <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="fdr",
+                                          pvalueCutoff = 0.01 , minGSSize = 1 )
+    
+    # add LFC to the result table
+    path_REACT_GSEAfdr0.01@result$Ave.log2FC <- sapply( 1:nrow(path_REACT_GSEAfdr0.01), 
+                                                        function(ii){
+                                                          gset <- unlist(stringr::str_split(path_REACT_GSEAfdr0.01@result$core_enrichment[ii],"/") )
+                                                          mean( dyf1_marrayLFC[ names( dyf1_marrayLFC )%in% gset], na.rm =T)
+                                                        } )
+    # convert EntrezIDs to gene names
+    library(reactome.db)
+    xx <- as.list(reactomePATHID2EXTID)
+    path_REACT_GSEAfdr0.01@result$gNames <- Reduce( c, lapply( 1:nrow(path_REACT_GSEAfdr0.01), function(ii){
+      paste( unique( tx2gene$external_gene_name[ match( xx[[ path_REACT_GSEAfdr0.01@result$ID[ii] ]] , 
+                                                        tx2gene$entrezgene_id)] ) , sep = "/", collapse = "/")
+    }) )
+    
+    # save results
+    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
+                 quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
+    
+    ### plot comprehensive overview of significantly enriched pathways
+    # add reverse LFC for better vis with emapplot
+    XX <- pairwise_termsim(path_REACT_GSEAfdr0.01)
+    XX@result$aveRevLFC <- -1*sapply( 1:nrow(XX), function(ii){
+      gset <- unlist(stringr::str_split(XX@result$core_enrichment[ii],"/") )
+      mean( dyf1_marrayLFC [names( dyf1_marrayLFC )%in% gset], na.rm =T)
+    } )
+    
+    # shorten path names
+    XX@result$Description <- sapply(XX@result$Description, wrap_text)
+    # Figure 4. a) plot connection between pathways, color nodes based on ave. LFC
+    emapplot(pairwise_termsim(XX), color="aveRevLFC",
+             showCategory=nrow(XX),min_edge = 0.1, cex_label_category=0.5)
+    
+    
+    ### select Sensory perception and Neuronal signaling pathways
+    # parameter asis=T to return the original type of object 
+    path_REACT_GSEA.SP.NS <- path_REACT_GSEAfdr0.01[(path_REACT_GSEAfdr0.01@result$Description %in%
+                                                       React_pathID$V2[ React_pathID$V1 %in%
+                                                                          react_SP.NS ] ) , asis=T ]
+    # add a column to the result table that shows if a pathway belongs to 
+    # Sensory perception or Neuronal signaling categories
+    path_REACT_GSEAfdr0.01@result$SP.NS <- ifelse( (path_REACT_GSEAfdr0.01@result$Description %in%
+                                                      React_pathID$V2[ React_pathID$V1 %in%
+                                                                         react_SP.NS ] ) , "YES","NO")
+    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
+                 quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
+    
+    ### cnetplot: plot connection between termes and genes
+    # wrap pathway names to improve visualization
+    path_REACT_GSEA.SP.NS@result$Description <-  sapply( path_REACT_GSEA.SP.NS@result$Description , wrap_text )
+    # make a plot
+    PP <- cnetplot( path_REACT_GSEA.SP.NS, foldChange = dyf1_marrayLFC , cex_label_gene=0.6)
+    # convert entrezID to gene names
+    PP$layers[[4]]$data$name <- tx2gene$external_gene_name[ match( PP$layers[[4]]$data$name , tx2gene$entrezgene_id)]
+    # plot
+    print( PP )
+    
+    # # enrichemtn plots
+    # lapply( 1:nrow(path_REACT_GSEA.SP.NS), function(ii){
+    #   pdf(height = 6, width = 8, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
+    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.pdf",sep = ""))
+    #   
+    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
+    #                   geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
+    #   dev.off()
+    #   
+    #   png(height = 400, width = 600, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
+    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.png",sep = ""))
+    #   
+    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
+    #                    geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
+    #   dev.off()
+    # })
+  }
+  
+  
+}
 
 ### Figure 4. b) microarray LFC heatmap of selected neuropeptide genes
   {
@@ -310,150 +451,6 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
   
   
 }
-
-
-### Figure 4. a) GSEA pathway analysis
-  {
-  ### extract neuronal system R-CEL-112316 and sensory perception R-CEL-9709957
-    {
-      library( data.tree)
-      library( DiagrammeR )
-      
-      # load pathway hirerarchy
-      react_hire <- read.table( paste( wdir, "ReactomePathwaysRelation.txt" , sep = ""), 
-                                header = F,  sep = "\t")
-      react_select <- react_hire[grep("R-CEL" , react_hire$V1 ),]
-      
-      # extract neuronal system tree
-      name1 <- "R-CEL-112316"
-      indexNS <- numeric()
-      while( !isEmpty( name1 )){
-        indexNS <- c( indexNS , which(  react_select$V1%in% name1 ))
-        name1 <-  react_select$V2[ react_select$V1%in% name1]
-      }
-      react_NS <- react_select[ indexNS , ]
-      # tree view
-      react_NS_tree <- FromDataFrameNetwork( react_NS ) 
-      
-      # extract sensory perception tree
-      name1 <- "R-CEL-9709957"
-      indexSP <- numeric()
-      while( !isEmpty( name1 )){
-        indexSP <- c( indexSP , which(  react_select$V1%in% name1 ))
-        name1 <-  react_select$V2[ react_select$V1%in% name1]
-      }
-      react_SP <- react_select[ indexSP , ]
-      # tree view
-      react_SP_tree <- FromDataFrameNetwork( react_SP ) 
-      
-      # convert paths IDs 
-      React_pathID <- read.table( paste( wdir, "ReactomePathways.txt" , sep = ""), 
-                                  header = F,  sep = "\t", quote = "")
-      
-      # get reactome IDs of SP and NS pathways
-      react_SP.NS <- unique( c(react_SP$V1,react_SP$V2, react_NS$V1 , react_NS$V2 ))
-     
-    }  
- 
-  
-  ### perform GSEA analysis with reactomePA
-    {
-    
-    library( ReactomePA )
-    library(enrichplot)
-    options(connectionObserver = NULL)
-    
-    # get ranked list of genes
-    x <- dyf1_marrayTab
-    x <- merge( x, tx2gene , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
-    x <- aggregate( list( logFC= x$logFC , P.Value=x$P.Value), by= list(entrezgene_id=x$entrezgene_id) , mean)
-    dyf1_marrayLFC <- setNames(x$logFC,x$entrezgene_id)
-    dyf1_marrayLFC <- dyf1_marrayLFC[order(-dyf1_marrayLFC)]
-    
-    # perform GSEA
-    path_REACT_GSEA <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="none",
-                                   pvalueCutoff = 0.05 , minGSSize = 1 )
-   
-    # get a list of all fdr-corrected significant pathways for visualisation
-    path_REACT_GSEAfdr0.01 <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="fdr",
-                pvalueCutoff = 0.01 , minGSSize = 1 )
-    
-    # add LFC to the result table
-    path_REACT_GSEAfdr0.01@result$Ave.log2FC <- sapply( 1:nrow(path_REACT_GSEAfdr0.01), 
-                                                    function(ii){
-                                                    gset <- unlist(stringr::str_split(path_REACT_GSEAfdr0.01@result$core_enrichment[ii],"/") )
-                                                    mean( dyf1_marrayLFC[ names( dyf1_marrayLFC )%in% gset], na.rm =T)
-                                                      } )
-    # convert EntrezIDs to gene names
-    path_REACT_GSEAfdr0.01@result$gNames <- Reduce( c, lapply( 1:nrow(path_REACT_GSEAfdr0.01), function(ii){
-      paste( unique( tx2gene$external_gene_name[ match( unlist(stringr::str_split( 
-        path_REACT_GSEAfdr0.01@result$core_enrichment[ii],"/") ) , 
-        tx2gene$entrezgene_id)] ) , sep = "/", collapse = "/")
-    }) )
-    
-    # save results
-    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
-                quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
-   
-    ### plot comprehensive overview of significantly enriched pathways
-    # add reverse LFC for better vis with emapplot
-    XX <- pairwise_termsim(path_REACT_GSEAfdr0.01)
-    XX@result$aveRevLFC <- -1*sapply( 1:nrow(XX), function(ii){
-                                gset <- unlist(stringr::str_split(XX@result$core_enrichment[ii],"/") )
-                                mean( dyf1_marrayLFC [names( dyf1_marrayLFC )%in% gset], na.rm =T)
-                                                          } )
-    
-    # shorten path names
-    XX@result$Description <- sapply(XX@result$Description, wrap_text)
-    # Figure 4. a) plot connection between pathways, color nodes based on ave. LFC
-    emapplot(pairwise_termsim(XX), color="aveRevLFC",
-             showCategory=nrow(XX),min_edge = 0.1, cex_label_category=0.5)
-    
-
-    ### select Sensory perception and Neuronal signaling pathways
-    # parameter asis=T to return the original type of object 
-    path_REACT_GSEA.SP.NS <- path_REACT_GSEAfdr0.01[(path_REACT_GSEAfdr0.01@result$Description %in%
-                                               React_pathID$V2[ React_pathID$V1 %in%
-                                                                  react_SP.NS ] ) , asis=T ]
-    # add a column to the result table that shows if a pathway belongs to 
-    # Sensory perception or Neuronal signaling categories
-    path_REACT_GSEAfdr0.01@result$SP.NS <- ifelse( (path_REACT_GSEAfdr0.01@result$Description %in%
-                                               React_pathID$V2[ React_pathID$V1 %in%
-                                                                  react_SP.NS ] ) , "YES","NO")
-    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
-                 quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
-    
-    ### cnetplot: plot connection between termes and genes
-    # wrap pathway names to improve visualization
-    path_REACT_GSEA.SP.NS@result$Description <-  sapply( path_REACT_GSEA.SP.NS@result$Description , wrap_text )
-    # make a plot
-    PP <- cnetplot( path_REACT_GSEA.SP.NS, foldChange = dyf1_marrayLFC , cex_label_gene=0.6)
-    # convert entrezID to gene names
-    PP$layers[[4]]$data$name <- tx2gene$external_gene_name[ match( PP$layers[[4]]$data$name , tx2gene$entrezgene_id)]
-    # plot
-    print( PP )
-
-    # # enrichemtn plots
-    # lapply( 1:nrow(path_REACT_GSEA.SP.NS), function(ii){
-    #   pdf(height = 6, width = 8, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
-    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.pdf",sep = ""))
-    #   
-    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
-    #                   geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
-    #   dev.off()
-    #   
-    #   png(height = 400, width = 600, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
-    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.png",sep = ""))
-    #   
-    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
-    #                    geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
-    #   dev.off()
-    # })
-  }
-  
-  
-}
-
 
 ### Figure 5. a) visualize Cel04020 KEGG pathway
   {
