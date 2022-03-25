@@ -10,12 +10,18 @@ library(ggplot2)
 
 ### get a table with different IDs and annotation from the BioMart
 mart_cel <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "celegans_gene_ensembl")
-tx2gene <- biomaRt::getBM(attributes = c("ensembl_transcript_id", "entrezgene_id" , "ensembl_gene_id","external_gene_name","transcript_biotype","gene_biotype"), mart = mart_cel)
+tx2gene_cel <- biomaRt::getBM(attributes = c(
+  "ensembl_transcript_id", "entrezgene_id" , 
+  "ensembl_gene_id","external_gene_name",
+  "transcript_biotype","gene_biotype", "uniprotsptrembl" ), mart = mart_cel)
 # path to the directory containing results of DE analysis of the masspec data
 wdir <- "Revision.data_CelSensing_20.10.2021/"
 setwd(wdir)
+# load functions
+source( "/home/tim_nevelsk/PROJECTS/myCode/usefulRfunc.r")
+
 # define function for making 1) sample distance heatmap and 2) PCA 
-PCA_heatm_plot=function(count_table, samples=NA, groups , 
+PCA_heatm_plot <- function(count_table, samples=NA, groups , 
                        logtrans=F, title="PCA")
   {
   # sample - to use as labels of individual samples
@@ -78,7 +84,7 @@ library(DEP)
   dyf1_intens <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
                           file= paste( wdir, "analyis_replication/raw_data/masspec_LFQfiltered.tsv", sep = "" ) )
     # results of the DE analysis: pairwise comparison of dyf1 to all other genotypes
-  dyf1_DEpair <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
+    dyf1_DEpair <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
                             file=paste( wdir, "analyis_replication/allVSdyf1_masspecDEresults.tsv" , sep = "" ))
 }
 
@@ -90,40 +96,54 @@ library(DEP)
                             logtrans=F) 
     
   ### volcano plot
-  datTOplot <- dyf1_DEpair
-  # add a column of NAs
-  datTOplot$diffexpressed <- "NO"
-  # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
-  datTOplot$diffexpressed[datTOplot$X563_ctrl_0_vs_X915_0_ratio < 0 & datTOplot$X563_ctrl_0_vs_X915_0_p.adj < 0.1] <- "UP"
-  # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-  datTOplot$diffexpressed[datTOplot$X563_ctrl_0_vs_X915_0_ratio > 0 & datTOplot$X563_ctrl_0_vs_X915_0_p.adj < 0.1] <- "DOWN"
+    # list columns that correspond to all contrasts tested
+  comapre <- grep( "p.val", colnames(datTOplot))
   
-  
-  
-  # Now write down the name of genes beside the points...
-  # Create a new column "delabel" to de, that will contain the name of genes differentially expressed (NA in case they are not)
-  datTOplot$delabel <- NA
-  datTOplot$delabel[datTOplot$X563_ctrl_0_vs_X915_0_p.adj < 0.1 ] <- datTOplot$name[datTOplot$X563_ctrl_0_vs_X915_0_p.adj < 0.1 ]
-  
-  # reverse LFC to make wild-type the reference
-  datTOplot$'-log2FC' <- -1*(datTOplot$X563_ctrl_0_vs_X915_0_ratio)
-  datTOplot$'-log10(qvalue)' <- -log10(datTOplot$X563_ctrl_0_vs_X915_0_p.adj)
-  
-  
-  # plot adding up all layers we have seen so far
-  ggplot(data=datTOplot, aes( y=datTOplot$'-log10(qvalue)', 
-                              x= datTOplot$'-log2FC' ,
-                              col=diffexpressed, label=delabel)) +
-    geom_point() + 
-    theme_minimal() +
-    geom_text_repel() +
-    scale_color_manual(values=c("blue", "black", "red")) +
-    geom_hline(yintercept=-log10(0.1), col="red") + 
-    labs(y="-log10(qvalue)", x = "-log2FC", colour = "Diff. Expr") +
-    scale_x_continuous( n.breaks = 8)+
-    theme(axis.text=element_text(size=14 ), legend.title=element_text(size=16),
-          axis.title=element_text(size=16), legend.text=element_text(size=16)) 
-  
+  # make a volcano plot for each comparison
+  for( ii in comapre ){
+    
+    datTOplot <- dyf1_DEpair 
+    
+ 
+    # add a column of NAs
+    datTOplot$diffexpressed <- "NO"
+    # if log2Foldchange > 0 and padj < 0.1, set as "UP" 
+    datTOplot$diffexpressed[ datTOplot[[ii+10]] < 0 & datTOplot[[ii+3]] < 0.1] <- "UP"
+    # if log2Foldchange < 0 and padj < 0.1, set as "DOWN"
+    datTOplot$diffexpressed[ datTOplot[[ii+10]] > 0 & datTOplot[[ii+3]] < 0.1] <- "DOWN"
+    
+    
+    
+    # Now write down the name of genes beside the points...
+    # Create a new column "delabel" to de, that will contain the name of genes differentially expressed (NA in case they are not)
+    datTOplot$delabel <- NA
+    datTOplot$delabel[datTOplot[[ii+3]] < 0.1 ] <- datTOplot$name[datTOplot[[ii+3]] < 0.1 ]
+    
+    # reverse LFC to make wild-type the reference
+    datTOplot$'-log2FC' <- -1*(datTOplot[[ii+10]])
+    datTOplot$'-log10(qvalue)' <- -log10(datTOplot[[ii+3]])
+    
+    
+    # plot adding up all layers we have seen so far
+    gg <- ggplot(data=datTOplot, aes( y=datTOplot$'-log10(qvalue)', 
+                                x= datTOplot$'-log2FC' ,
+                                col=diffexpressed, label=delabel)) +
+      geom_point() + 
+      theme_minimal() +
+      geom_text_repel() +
+      scale_color_manual(values=c("blue", "black", "red")) +
+      geom_hline(yintercept=-log10(0.1), col="red") + 
+      labs(y="-log10(qvalue)", x = "-log2FC", colour = "Diff. Expr",
+           title = gsub( "X|_0|_p.val","" , colnames(datTOplot)[ii])) +
+      scale_x_continuous( n.breaks = 8)+
+      theme(text=element_text(size=18 )) 
+    
+    pdf( paste(wdir, gsub( "X|_0|_p.val","" , colnames(datTOplot)[ii]) ,
+         ".masspec_volcano.pdf",sep = ""), height = 8, width = 10 )
+      print(gg)
+    dev.off()
+  }
+ 
   
   }
 
@@ -168,7 +188,7 @@ library(DEP)
   
 }
   
-###=================  Microarray data analysis of wild-type and dyf-1 mutants ================
+###================= Microarray data analysis of wild-type and dyf-1 mutants ================
 # ### processing and DE analysis of MA data 
 #   {
 #   library(gcrma)
@@ -214,7 +234,7 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
     ### PCA plot
     PCA_heatm_plot( MAexprdata , samples=labels , groups=design)
     
-    ### Volcano plot
+    ### Volcano plots
     {
       datTOplot <- dyf1_marrayTab
       # add a column of NAs
@@ -286,6 +306,7 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
   
 ### Figure 4. a) GSEA pathway analysis
   {
+    
   ### extract neuronal system R-CEL-112316 and sensory perception R-CEL-9709957
   {
     library( data.tree)
@@ -319,144 +340,289 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
     react_SP_tree <- FromDataFrameNetwork( react_SP ) 
     
     # convert paths IDs 
-    React_pathID <- read.table( paste( wdir, "ReactomePathways.txt" , sep = ""), 
-                                header = F,  sep = "\t", quote = "")
+    React_pathID <- read.table( paste( wdir, "ReactomePathways.txt" , sep = "" ), 
+                                header = F,  sep = "\t", quote = "" )
     
     # get reactome IDs of SP and NS pathways
     react_SP.NS <- unique( c(react_SP$V1,react_SP$V2, react_NS$V1 , react_NS$V2 ))
     
   }  
   
-  
-  ### perform GSEA analysis with reactomePA
-  {
-    
     library( ReactomePA )
-    library(enrichplot)
+    library( enrichplot )
     options(connectionObserver = NULL)
     
-    # get ranked list of genes
-    x <- dyf1_marrayTab
-    x <- merge( x, tx2gene , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
-    x <- aggregate( list( logFC= x$logFC , P.Value=x$P.Value), by= list(entrezgene_id=x$entrezgene_id) , mean)
-    dyf1_marrayLFC <- setNames(x$logFC,x$entrezgene_id)
-    dyf1_marrayLFC <- dyf1_marrayLFC[order(-dyf1_marrayLFC)]
+  ### perform GSEA of microarray data with reactomePA
+    {
+      # get ranked list of genes
+      x <- dyf1_marrayTab
+      x$entrezgene_id <- tx2gene_cel$entrezgene_id[match( x$SYMBOL, tx2gene_cel$external_gene_name )]
+      x <- aggregate( list( logFC= x$logFC , P.Value=x$P.Value), by= list(entrezgene_id=x$entrezgene_id) , mean)
+      dyf1_marrayLFC <- setNames( x$logFC, x$entrezgene_id )
+      dyf1_marrayLFC <- dyf1_marrayLFC[ order( -dyf1_marrayLFC ) ]
+      
+      # perform GSEA, get a list of all fdr-corrected significant pathways for visualisation
+      path_REACT_GSEAfdr0.01 <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="fdr",
+                                            pvalueCutoff = 0.01 , minGSSize = 1 )
+      
+      
+      # add LFC to the result table
+      path_REACT_GSEAfdr0.01@result$Ave.log2FC <- sapply( 1:nrow(path_REACT_GSEAfdr0.01), 
+                                                          function(ii){
+                                                            gset <- unlist(stringr::str_split(path_REACT_GSEAfdr0.01@result$core_enrichment[ii],"/") )
+                                                            mean( dyf1_marrayLFC[ names( dyf1_marrayLFC )%in% gset], na.rm =T)
+                                                          } )
+      # convert EntrezIDs to gene names
+      library(reactome.db)
+      xx <- as.list(reactomePATHID2EXTID)
+      path_REACT_GSEAfdr0.01@result$gNames <- Reduce( c, lapply( 1:nrow(path_REACT_GSEAfdr0.01), function(ii){
+        paste( unique( tx2gene_cel$external_gene_name[ match( xx[[ path_REACT_GSEAfdr0.01@result$ID[ii] ]] , 
+                                                              tx2gene_cel$entrezgene_id)] ) , sep = "/", collapse = "/")
+      }) )
+      
+      ### plot comprehensive overview of significantly enriched pathways
+      # add reverse LFC for better vis with emapplot
+      XX <- pairwise_termsim( path_REACT_GSEAfdr0.01 )
+      XX@result$aveRevLFC <- -1*sapply( 1:nrow(XX), function(ii){
+        gset <- unlist(stringr::str_split(XX@result$core_enrichment[ii],"/") )
+        mean( dyf1_marrayLFC [names( dyf1_marrayLFC )%in% gset], na.rm =T)
+      } )
+      
+      # shorten path names
+      XX@result$Description <- sapply(XX@result$Description, wrap_text)
+      # Figure 4. a) plot connection between pathways, color nodes based on ave. LFC
+      emapplot( pairwise_termsim(XX), color="aveRevLFC",
+                showCategory=nrow(XX),min_edge = 0.1, 
+                cex_label_category=0.5)
+      
+      write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
+                   quote = F, file = "GSEA/path_REACT_GSEAfdr0.01.tsv" )
+    }
     
-    # perform GSEA
-    path_REACT_GSEA <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="none",
-                                   pvalueCutoff = 0.05 , minGSSize = 1 )
+  ### perform GSEA of microarray data GO
+    {
+      # get ranked list of genes
+      x <- dyf1_marrayTab
+      x <- merge( x, tx2gene_cel , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
+      x <- aggregate( list( logFC= x$logFC , P.Value=x$P.Value), by= list(entrezgene_id=x$entrezgene_id) , mean)
+      dyf1_marrayLFC <- setNames( x$logFC, x$entrezgene_id )
+      dyf1_marrayLFC <- dyf1_marrayLFC[ order( -dyf1_marrayLFC ) ]
+      
+      # perform GSEA, get a list of all fdr-corrected significant pathways for visualisation
+      GO_GSEA <- clusterProfiler::gseGO( geneList= dyf1_marrayLFC ,
+                                              keyType="ENTREZID",
+                                              ont = "ALL", 
+                                              OrgDb = org.Ce.eg.db , 
+                                              pAdjustMethod="fdr",
+                                            pvalueCutoff = 0.05 ,
+                                            minGSSize = 3 )
+      
+      
+      # add LFC to the result table
+      GO_GSEA_tab <- GO_GSEA@result
+      GO_GSEA_tab$Ave.log2FC <- sapply( 1:nrow(GO_GSEA_tab), 
+                                          function(ii){
+                                           gset <- unlist(stringr::str_split(GO_GSEA@result$core_enrichment[ii],"/") )
+                                           mean( dyf1_marrayLFC[ names( dyf1_marrayLFC )%in% gset], na.rm =T)
+                                                          } )
+      # convert EntrezIDs to gene names
+      library(reactome.db)
+      xx <- as.list(reactomePATHID2EXTID)
+      GO_GSEA_tab$gNames <- Reduce( c , 
+                                      lapply( 1:nrow( GO_GSEA_tab ), function(ii){
+                                        pp <- paste( tx2gene_cel$external_gene_name[ match(
+                                          unlist(strsplit(  GO_GSEA_tab$core_enrichment[ii], "/") ) ,
+                                          tx2gene_cel$entrezgene_id)] , sep = "/", collapse = "/" )
+                                        return(pp)
+                                      }) )
+      
+      ### plot comprehensive overview of significantly enriched pathways
+      # add reverse LFC for better vis with emapplot
+      # GO_GSEA <- GO_GSEA@result[GO_GSEA@result$qvalues < 0.00000001,]
+      XX <- pairwise_termsim( GO_GSEA )
+      XX@result$aveRevLFC <- -1*sapply( 1:nrow(XX), function(ii){
+        gset <- unlist(stringr::str_split(XX@result$core_enrichment[ii],"/") )
+        mean( dyf1_marrayLFC [names( dyf1_marrayLFC )%in% gset], na.rm =T)
+      } )
+      
+      # shorten path names
+      XX@result$Description <- sapply(XX@result$Description, wrap_text)
+      
+      # Figure 4. a) plot connection between pathways, color nodes based on ave. LFC
+      pdf(height = 8, width = 8, file = "GSEA/MA_GO_GSEA_pathConnect.pdf")
+        emapplot( pairwise_termsim(XX), color="aveRevLFC",
+               showCategory=100 , min_edge = 0.2, cex_label_category=0.5)
+      dev.off()
+      
+      write.table( GO_GSEA_tab , sep = "\t", row.names = F,
+                   quote = F, file = "GSEA/MA_GO_GSEA.tsv" )
+    }
     
-    # get a list of all fdr-corrected significant pathways for visualisation
-    path_REACT_GSEAfdr0.01 <- gsePathway( geneList= dyf1_marrayLFC , organism = "celegans", pAdjustMethod="fdr",
-                                          pvalueCutoff = 0.01 , minGSSize = 1 )
+  ### select and plot Sensory perception and Neuronal signaling pathways
+    {
+      # parameter asis=T to return the original type of object 
+      path_REACT_GSEA.SP.NS <- path_REACT_GSEAfdr0.01[(path_REACT_GSEAfdr0.01@result$Description %in%
+                                                         React_pathID$V2[ React_pathID$V1 %in%
+                                                                            react_SP.NS ] ) , asis=T ]
+      # add a column to the result table that shows if a pathway belongs to 
+      # Sensory perception or Neuronal signaling categories
+      path_REACT_GSEAfdr0.01@result$SP.NS <- ifelse( (path_REACT_GSEAfdr0.01@result$Description %in%
+                                                        React_pathID$V2[ React_pathID$V1 %in%
+                                                                           react_SP.NS ] ) , "YES","NO")
+      write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
+                   quote = F, file = "GSEA/path_REACT_GSEAfdr0.01.tsv")
+      
+      ### cnetplot: plot connection between termes and genes
+      # wrap pathway names to improve visualization
+      path_REACT_GSEA.SP.NS@result$Description <-  sapply( path_REACT_GSEA.SP.NS@result$Description , wrap_text )
+      # make a plot
+      PP <- cnetplot( path_REACT_GSEA.SP.NS, foldChange = dyf1_marrayLFC , cex_label_gene=0.6)
+      # convert entrezID to gene names
+      PP$layers[[4]]$data$name <- tx2gene_cel$external_gene_name[ match( PP$layers[[4]]$data$name , tx2gene_cel$entrezgene_id)]
+      # plot
+      print( PP )
+      
+      # enrichemtn plots
+      lapply( 1:nrow(path_REACT_GSEA.SP.NS), function(ii){
+        pdf(height = 6, width = 8, file = paste("GSEA/", rownames(path_REACT_GSEA.SP.NS@result)[ii], 
+                                                "_gsea.pdf",sep = ""))
+        
+        print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
+                         geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
+        dev.off()
+        
+        png(height = 400, width = 600, file = paste("GSEA/", rownames(path_REACT_GSEA.SP.NS@result)[ii],
+                                                    "_gsea.png",sep = ""))
+        
+        print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
+                         geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
+        dev.off()
+      })
+    }
     
-    # add LFC to the result table
-    path_REACT_GSEAfdr0.01@result$Ave.log2FC <- sapply( 1:nrow(path_REACT_GSEAfdr0.01), 
-                                                        function(ii){
-                                                          gset <- unlist(stringr::str_split(path_REACT_GSEAfdr0.01@result$core_enrichment[ii],"/") )
-                                                          mean( dyf1_marrayLFC[ names( dyf1_marrayLFC )%in% gset], na.rm =T)
-                                                        } )
-    # convert EntrezIDs to gene names
-    library(reactome.db)
-    xx <- as.list(reactomePATHID2EXTID)
-    path_REACT_GSEAfdr0.01@result$gNames <- Reduce( c, lapply( 1:nrow(path_REACT_GSEAfdr0.01), function(ii){
-      paste( unique( tx2gene$external_gene_name[ match( xx[[ path_REACT_GSEAfdr0.01@result$ID[ii] ]] , 
-                                                        tx2gene$entrezgene_id)] ) , sep = "/", collapse = "/")
-    }) )
-    
-    # save results
-    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
-                 quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
-    
-    ### plot comprehensive overview of significantly enriched pathways
-    # add reverse LFC for better vis with emapplot
-    XX <- pairwise_termsim(path_REACT_GSEAfdr0.01)
-    XX@result$aveRevLFC <- -1*sapply( 1:nrow(XX), function(ii){
-      gset <- unlist(stringr::str_split(XX@result$core_enrichment[ii],"/") )
-      mean( dyf1_marrayLFC [names( dyf1_marrayLFC )%in% gset], na.rm =T)
-    } )
-    
-    # shorten path names
-    XX@result$Description <- sapply(XX@result$Description, wrap_text)
-    # Figure 4. a) plot connection between pathways, color nodes based on ave. LFC
-    emapplot(pairwise_termsim(XX), color="aveRevLFC",
-             showCategory=nrow(XX),min_edge = 0.1, cex_label_category=0.5)
-    
-    
-    ### select Sensory perception and Neuronal signaling pathways
-    # parameter asis=T to return the original type of object 
-    path_REACT_GSEA.SP.NS <- path_REACT_GSEAfdr0.01[(path_REACT_GSEAfdr0.01@result$Description %in%
-                                                       React_pathID$V2[ React_pathID$V1 %in%
-                                                                          react_SP.NS ] ) , asis=T ]
-    # add a column to the result table that shows if a pathway belongs to 
-    # Sensory perception or Neuronal signaling categories
-    path_REACT_GSEAfdr0.01@result$SP.NS <- ifelse( (path_REACT_GSEAfdr0.01@result$Description %in%
-                                                      React_pathID$V2[ React_pathID$V1 %in%
-                                                                         react_SP.NS ] ) , "YES","NO")
-    write.table( path_REACT_GSEAfdr0.01, sep = "\t", row.names = F,
-                 quote = F, file = "path_REACT_GSEAfdr0.01.tsv")
-    
-    ### cnetplot: plot connection between termes and genes
-    # wrap pathway names to improve visualization
-    path_REACT_GSEA.SP.NS@result$Description <-  sapply( path_REACT_GSEA.SP.NS@result$Description , wrap_text )
-    # make a plot
-    PP <- cnetplot( path_REACT_GSEA.SP.NS, foldChange = dyf1_marrayLFC , cex_label_gene=0.6)
-    # convert entrezID to gene names
-    PP$layers[[4]]$data$name <- tx2gene$external_gene_name[ match( PP$layers[[4]]$data$name , tx2gene$entrezgene_id)]
-    # plot
-    print( PP )
-    
-    # # enrichemtn plots
-    # lapply( 1:nrow(path_REACT_GSEA.SP.NS), function(ii){
-    #   pdf(height = 6, width = 8, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
-    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.pdf",sep = ""))
-    #   
-    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
-    #                   geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
-    #   dev.off()
-    #   
-    #   png(height = 400, width = 600, file = paste("/home/tim_nevelsk/PROJECTS/celegans_sensingKavya/GSEA/",
-    #                                           rownames(path_REACT_GSEA.SP.NS@result)[ii],"_gsea.png",sep = ""))
-    #   
-    #   print( gseaplot( path_REACT_GSEA, title = (path_REACT_GSEA.SP.NS@result$Description[ii]),
-    #                    geneSetID = rownames(path_REACT_GSEA.SP.NS@result)[ii]))
-    #   dev.off()
-    # })
-  }
-  
-  
-}
+  ### perform GSEA of proteomics data with reactomePA
+    {
+      ### convert feature names to entrezID
+      datTOplot <- dyf1_DEpair 
+      datTOplot$entrezgene_id <- tx2gene_cel$entrezgene_id[ 
+        match( datTOplot$name, tx2gene_cel$external_gene_name ) ]
+      datTOplot$entrezgene_id[ is.na( datTOplot$entrezgene_id )]  <- tx2gene_cel$entrezgene_id[ 
+        match( datTOplot$ID[ is.na( datTOplot$entrezgene_id )],  tx2gene_cel$uniprotsptrembl ) ]
+     
 
-### Figure 4. b) microarray LFC heatmap of selected neuropeptide genes
+      
+      # do GO and pathway analysis for all contrasts and selected proteins
+      DElistProt <- list(  datTOplot$entrezgene_id[ datTOplot[[3]] < 0.1 ], 
+                           datTOplot$entrezgene_id[ datTOplot[[4]] < 0.1 ] , 
+                           datTOplot$entrezgene_id[ datTOplot[[5]] < 0.1 ] , 
+                           datTOplot$entrezgene_id[datTOplot$name%in% set1] )
+      names(DElistProt) <- c( gsub( "X|_0|_p.val","" , colnames(datTOplot)[3:5]), "heatmap")
+      
+      for( ii in seq( DElistProt ) ){
+         
+        # select significant genes for over-representation analysis
+        ggenes <- as.character( na.omit( DElistProt[[ii]] ) )
+        
+        # perform Reactome ora
+        prot_path.REACT_ORA <- enrichPathway( gene = ggenes , organism = "celegans", pAdjustMethod="fdr",
+                                              pvalueCutoff = 0.05 , 
+                                              minGSSize = 3 , readable=F ,
+                                              universe = as.character( datTOplot$entrezgene_id ) )
+        # perform GO ora
+        prot_path.GO_ORA <- clusterProfiler::enrichGO( gene  = ggenes,
+                                          universe = as.character( datTOplot$entrezgene_id ),
+                                           OrgDb        = org.Ce.eg.db,
+                                           keyType = "ENTREZID",
+                                           ont          = "ALL",
+                                           minGSSize    = 3,
+                                           pvalueCutoff = 0.05 )
+        
+        # remove an extra column to combine with reactome results
+        prot_path.GO_ORA@result$ID <- paste(prot_path.GO_ORA@result$ONTOLOGY ,
+                                            prot_path.GO_ORA@result$ID , sep = "_") 
+        prot_path.GO_ORA@result <- prot_path.GO_ORA@result[,-1]
+        # combine with reactome results
+        prot_path.GO.REACT_ORA <- rbind(  prot_path.GO_ORA@result ,
+                                          prot_path.REACT_ORA@result )
+        # remove ontologies with p-value > 0.05
+        prot_path.GO.REACT_ORA <- prot_path.GO.REACT_ORA[prot_path.GO.REACT_ORA$pvalue < 0.05,]
+       
+        # convert entrez to gene names
+
+        prot_path.GO.REACT_ORA$gNames <- Reduce( c , 
+          lapply( 1:nrow( prot_path.GO.REACT_ORA ), function(ii){
+          pp <- paste( tx2gene_cel$external_gene_name[ match(
+            unlist(strsplit( prot_path.GO.REACT_ORA$geneID[ii], "/") ) ,
+           tx2gene_cel$entrezgene_id)] , sep = "/", collapse = "/" )
+          return(pp)
+        }) )
+        
+        # save
+        write.table( prot_path.GO.REACT_ORA, sep = "\t", row.names = F,
+                     quote = F, file = paste( "GSEA/MS_", names(DElistProt)[ii] , 
+                  "_GO.REACT_ORA.tsv", sep = "" ) )
+       
+      }
+      
+     
+    }
+    
+    
+  }
+
+
+### Figure 4. b) microarray LFC heatmap of selected neuropeptides and shaperones
   {
     # aggregate different probes for same genes
     dyf1_marrayTab_agg <- aggregate(.~SYMBOL , data=dyf1_marrayTab[,c(3,5,8,9)] , FUN=mean )
-    # select genes
-    neuropept_sel <- dyf1_marrayTab_agg[which(grepl("nlp|ins-|flp",dyf1_marrayTab_agg$SYMBOL,ignore.case = T) & dyf1_marrayTab_agg$adj.P.Val<0.01),]
+    # select neuropeptide and shaperone genes
+    neuropept_genes <- grep( "nlp|ins-|flp", dyf1_marrayTab_agg$SYMBOL,
+                             ignore.case = T, value = T) 
+    shaper_genes <- grep( "hsf-|hsp-|dnj-|cct-", dyf1_marrayTab_agg$SYMBOL,
+                          ignore.case = T, value = T)
     
-    # ggplot
-    library(ggplot2)
-    library(scales)
+    extrafont::font_import()
+    
+    # lfc plot function
+    MAlfcPlot <- function( ggenes , plotName, qval_thr = 0.1 )
+      {
+      require(ggplot2)
+      require(scales)
+      # require(extrafont)
+      
+      genes_sel <- dyf1_marrayTab_agg[ (dyf1_marrayTab_agg$SYMBOL %in% ggenes) &
+                                         dyf1_marrayTab_agg$adj.P.Val < qval_thr , ]
+      
+      tb <- genes_sel
+      tb$SYMBOL <- as.character(tb$SYMBOL)
+      tb$SYMBOL <- factor(  tb$SYMBOL , levels =  tb$SYMBOL[order(tb$logFC)], labels =   tb$SYMBOL[order(tb$logFC)] )
+      print( dim(tb))
+      
+      # make a plot 
+      gg <- ggplot(data = tb, aes(x = " " , y = SYMBOL )) +  geom_tile(aes(fill = logFC)) +
+        theme_bw()+theme( panel.grid.major = element_blank(),axis.title.x = element_blank(),axis.title.y = element_blank(),
+                          panel.border = element_blank(),axis.ticks.x = element_blank(),axis.ticks.y = element_blank(),
+                          axis.text.y = element_text( size=12, face="italic"))+
+        scale_fill_gradient2( low = "blue", mid = "white", high = "red", midpoint=0, 
+                              guide = "colorbar", limits=c(min((tb$logFC), na.rm = T),
+                                                           max((tb$logFC), na.rm = T)), 
+                              name="log2FC of\ngene expression")  # color for pcorr as corr
+      # save the plot
+      pdf( height = nrow(tb)/3 , width = 4 , file = paste( plotName ,"_qval",qval_thr, "_MAlfc.pdf", sep = "") )
+        print( gg )
+      dev.off( )
+    }
   
-  # plot
-    tb <- neuropept_sel
-  tb$SYMBOL <- as.character(tb$SYMBOL)
-  # tb$SYMBOL[3] <- paste(as.character(tb$SYMBOL[3]),".",sep = "")
-  tb$SYMBOL <- factor(  tb$SYMBOL , levels =  tb$SYMBOL[order(tb$logFC)], labels =   tb$SYMBOL[order(tb$logFC)] )
-  ggplot(data = tb, aes(x = " " , y = SYMBOL )) +  geom_tile(aes(fill = logFC)) +
-    theme_bw()+theme( panel.grid.major = element_blank(),axis.title.x = element_blank(),axis.title.y = element_blank(),
-                      panel.border = element_blank(),axis.ticks.x = element_blank(),axis.ticks.y = element_blank(),
-                      axis.text.x = element_text(face="bold", angle=0,vjust=0.5,size=11),axis.text.y = element_text(size=11,face="italic",family = "arial"))+
-    scale_fill_gradient2( low = "blue", mid = "white", high = "red", midpoint=0,  guide = "colorbar", limits=c(min((tb$logFC), na.rm = T),max((tb$logFC), na.rm = T)), name="log2FC of\ngene expression")  # color for pcorr as corr
-  
-  
-}
+    MAlfcPlot( ggenes= neuropept_genes , plotName="neuropeptides", qval_thr = 0.01 )
+    MAlfcPlot( ggenes= shaper_genes , plotName="shaperone", qval_thr = 0.01 )
+    
+  }
 
 ### Figure 5. a) visualize Cel04020 KEGG pathway
   {
     # prepare data 
   x <- dyf1_marrayTab
-  x <- merge( x , tx2gene , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
+  x <- merge( x , tx2gene_cel , by.x ="SYMBOL", by.y = "external_gene_name",all = F)
   x <- aggregate(logFC~entrezgene_id, x ,sum)
   x <- setNames(x$logFC,x$entrezgene_id)
   
@@ -466,4 +632,21 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
             species="cel", kegg.native=T, out.suffix = "dyf1_KEGG",
             bins=list(gene=20, cpd=10) )
   
+  }
+
+###================= correlate results of proteomics and transcriptomics DE ####
+  {
+    MStab <- dyf1_DEpair
+    MStab$gName <- tx2gene_cel$external_gene_name[ match( MStab$name, tx2gene_cel$external_gene_name ) ]
+    MStab$gName[ is.na(MStab$gName)] <- tx2gene_cel$external_gene_name[ match( MStab$ID[ is.na(MStab$gName)], 
+                                                                 tx2gene_cel$uniprotswissprot ) ]
+    MStab$gName[ is.na(MStab$gName)] <- tx2gene_cel$external_gene_name[ match( MStab$ID[ is.na(MStab$gName)], 
+                                           tx2gene_cel$uniprotsptrembl ) ]
+    
+    geneCompare <- na.omit( intersect(dyf1_marrayTab$SYMBOL , MStab$gName ))
+   
+    cor.test( dyf1_marrayTab$logFC[ match( geneCompare , dyf1_marrayTab$SYMBOL)],
+              -1*( MStab$X563_ctrl_0_vs_X915_0_ratio[ match( geneCompare , MStab$gName)] ) ,
+         method = "spearman")
+    
 }
