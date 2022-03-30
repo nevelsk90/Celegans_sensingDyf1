@@ -6,16 +6,16 @@
 # load library
 library(ggrepel)
 library(ggplot2)
-
-
+library(biomaRt)
 ### get a table with different IDs and annotation from the BioMart
 mart_cel <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "celegans_gene_ensembl")
 tx2gene_cel <- biomaRt::getBM(attributes = c(
   "ensembl_transcript_id", "entrezgene_id" , 
   "ensembl_gene_id","external_gene_name",
-  "transcript_biotype","gene_biotype", "uniprotsptrembl" ), mart = mart_cel)
+  "transcript_biotype","gene_biotype", 
+  "uniprotsptrembl" , "uniprotswissprot" ), mart = mart_cel)
 # path to the directory containing results of DE analysis of the masspec data
-wdir <- "Revision.data_CelSensing_20.10.2021/"
+wdir <- ""
 setwd(wdir)
 # load functions
 source( "/home/tim_nevelsk/PROJECTS/myCode/usefulRfunc.r")
@@ -24,7 +24,8 @@ source( "/home/tim_nevelsk/PROJECTS/myCode/usefulRfunc.r")
 PCA_heatm_plot <- function(count_table, samples=NA, groups , 
                        logtrans=F, title="PCA")
   {
-  # sample - to use as labels of individual samples
+  # count_table - expression data input
+  # samples - to use as labels of individual samples
   # groups - experimental groups, e.g. wild-type and mutant
   # logtrans - log transform the data
   
@@ -81,11 +82,11 @@ library(DEP)
   {
     
     # load raw MasSpec intensities MA
-  dyf1_intens <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
-                          file= paste( wdir, "analyis_replication/raw_data/masspec_LFQfiltered.tsv", sep = "" ) )
+    dyf1_intens <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
+                          file= paste( wdir, "raw_data/masspec_LFQfiltered.tsv", sep = "" ) )
     # results of the DE analysis: pairwise comparison of dyf1 to all other genotypes
     dyf1_DEpair <- read.table(sep = "\t",stringsAsFactors = F , header = T, 
-                            file=paste( wdir, "analyis_replication/allVSdyf1_masspecDEresults.tsv" , sep = "" ))
+                            file=paste( wdir, "allVSdyf1_masspecDEresults.tsv" , sep = "" ))
 }
 
 ### Figure 3. a) PCA and volcano plots of DE results
@@ -224,8 +225,8 @@ library(DEP)
 ### Load results of DE analysis and raw MA data 
 # in total 26293 genes were analysed , 
 # 2939 genes are significntly DE under qvalue < 0.01 cut-off
-MAexprdata <- readRDS( paste( wdir, "analyis_replication/raw_data/dyf1_marray_rawRMA.rda" , sep = "") )
-dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEall.csv" , sep = ""), 
+MAexprdata <- readRDS( paste( wdir, "raw_data/dyf1_marray_rawRMA.rda" , sep = "") )
+dyf1_marrayTab <- read.table( paste( wdir, "dyf1_marray_DEall.csv" , sep = ""), 
                               header = T, row.names = 1 , sep = "\t")
 
 ### PCA and volcano plot of MA data 
@@ -303,8 +304,8 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
     stat_compare_means(aes(label = paste0("p = ", ..p.format..)))
   
   }
-  
-### Figure 4. a) GSEA pathway analysis
+
+### GSEA and ORA analysis using REACTOME and GO db
   {
     
   ### extract neuronal system R-CEL-112316 and sensory perception R-CEL-9709957
@@ -352,7 +353,7 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
     library( enrichplot )
     options(connectionObserver = NULL)
     
-  ### perform GSEA of microarray data with reactomePA
+  ### Figure 4. a) Reactome GSEA of microarray data
     {
       # get ranked list of genes
       x <- dyf1_marrayTab
@@ -399,7 +400,7 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
                    quote = F, file = "GSEA/path_REACT_GSEAfdr0.01.tsv" )
     }
     
-  ### perform GSEA of microarray data GO
+  ### GO GSEA of microarray data 
     {
       # get ranked list of genes
       x <- dyf1_marrayTab
@@ -500,7 +501,7 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
       })
     }
     
-  ### perform GSEA of proteomics data with reactomePA
+  ### GSEA of proteomics data
     {
       ### convert feature names to entrezID
       datTOplot <- dyf1_DEpair 
@@ -508,14 +509,13 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
         match( datTOplot$name, tx2gene_cel$external_gene_name ) ]
       datTOplot$entrezgene_id[ is.na( datTOplot$entrezgene_id )]  <- tx2gene_cel$entrezgene_id[ 
         match( datTOplot$ID[ is.na( datTOplot$entrezgene_id )],  tx2gene_cel$uniprotsptrembl ) ]
-     
 
       
       # do GO and pathway analysis for all contrasts and selected proteins
       DElistProt <- list(  datTOplot$entrezgene_id[ datTOplot[[3]] < 0.1 ], 
                            datTOplot$entrezgene_id[ datTOplot[[4]] < 0.1 ] , 
                            datTOplot$entrezgene_id[ datTOplot[[5]] < 0.1 ] , 
-                           datTOplot$entrezgene_id[datTOplot$name%in% set1] )
+                           datTOplot$entrezgene_id[datTOplot$name %in% set1] )
       names(DElistProt) <- c( gsub( "X|_0|_p.val","" , colnames(datTOplot)[3:5]), "heatmap")
       
       for( ii in seq( DElistProt ) ){
@@ -531,38 +531,66 @@ dyf1_marrayTab <- read.table( paste( wdir, "analyis_replication/dyf1_marray_DEal
         # perform GO ora
         prot_path.GO_ORA <- clusterProfiler::enrichGO( gene  = ggenes,
                                           universe = as.character( datTOplot$entrezgene_id ),
-                                           OrgDb        = org.Ce.eg.db,
+                                           OrgDb = org.Ce.eg.db,
                                            keyType = "ENTREZID",
                                            ont          = "ALL",
                                            minGSSize    = 3,
                                            pvalueCutoff = 0.05 )
         
+        ### make a result table
         # remove an extra column to combine with reactome results
-        prot_path.GO_ORA@result$ID <- paste(prot_path.GO_ORA@result$ONTOLOGY ,
-                                            prot_path.GO_ORA@result$ID , sep = "_") 
-        prot_path.GO_ORA@result <- prot_path.GO_ORA@result[,-1]
-        # combine with reactome results
-        prot_path.GO.REACT_ORA <- rbind(  prot_path.GO_ORA@result ,
-                                          prot_path.REACT_ORA@result )
+        XX <- prot_path.GO_ORA@result
+        XX$ID <- paste( XX$ONTOLOGY , XX$ID , sep = "_") 
+        XX <- XX[,-1]
+        # combine GO with Reactome results in one table
+        prot_GO.REACT_ORA <- rbind(  XX , prot_path.REACT_ORA@result)
         # remove ontologies with p-value > 0.05
-        prot_path.GO.REACT_ORA <- prot_path.GO.REACT_ORA[prot_path.GO.REACT_ORA$pvalue < 0.05,]
-       
+        prot_GO.REACT_ORA <- prot_GO.REACT_ORA[prot_GO.REACT_ORA$pvalue < 0.05,]
         # convert entrez to gene names
-
-        prot_path.GO.REACT_ORA$gNames <- Reduce( c , 
-          lapply( 1:nrow( prot_path.GO.REACT_ORA ), function(ii){
+        prot_GO.REACT.KEGG_ORA$gNames <- Reduce( c , 
+          lapply( 1:nrow( prot_GO.REACT.KEGG_ORA ), 
+                  function(ii){
           pp <- paste( tx2gene_cel$external_gene_name[ match(
-            unlist(strsplit( prot_path.GO.REACT_ORA$geneID[ii], "/") ) ,
+            unlist(strsplit( prot_GO.REACT.KEGG_ORA$geneID[ii], "/") ) ,
            tx2gene_cel$entrezgene_id)] , sep = "/", collapse = "/" )
           return(pp)
         }) )
+        # save a table
+        write.table( prot_GO.REACT.KEGG_ORA, sep = "\t", row.names = F,
+                     quote = F, file = paste( "GSEA/MS_", names(DElistProt)[ii] ,
+                  "_GO.REACT.KEGG_ORA.tsv", sep = "" ) )
         
-        # save
-        write.table( prot_path.GO.REACT_ORA, sep = "\t", row.names = F,
-                     quote = F, file = paste( "GSEA/MS_", names(DElistProt)[ii] , 
-                  "_GO.REACT_ORA.tsv", sep = "" ) )
-       
-      }
+        # if(ii==4){
+        #   ### plot comprehensive overview of significantly enriched pathways
+        #   # shorten path names
+        #   prot_path.REACT_ORA@result$Description <- sapply(prot_path.REACT_ORA@result$Description, wrap_text)
+        #   prot_path.GO_ORA@result$Description <- sapply(prot_path.GO_ORA@result$Description, wrap_text)
+        #   
+        #   ###  plot connection between pathways, color nodes based on ave. LFC
+        #   # generate plots
+        #   gg1 <- emapplot( pairwise_termsim(prot_path.REACT_ORA), # color="aveRevLFC",
+        #                    showCategory=nrow(prot_path.REACT_ORA@result),
+        #                    min_edge = 0.1, cex_label_category=0.5)
+        #   gg2 <- emapplot( pairwise_termsim(prot_path.GO_ORA), # color="aveRevLFC",
+        #                    showCategory=nrow(prot_path.GO_ORA@result),
+        #                    min_edge = 0.1, cex_label_category=0.5)
+        #   gg3 <- emapplot( pairwise_termsim(prot_path.KEGG_ORA), # color="aveRevLFC",
+        #                    showCategory=nrow(prot_path.KEGG_ORA@result),
+        #                    min_edge = 0.1, cex_label_category=0.5)
+        #   
+        #   # save plots
+        #   pdf(width = 10,height = 10, file= paste( "GSEA/MS_", names(DElistProt)[ii] , 
+        #                                            "_GO.REACT.KEGG_ORA.pdf", sep = "" ))
+        #   print(gg1)
+        #   print(gg2)
+        #   print(gg3)
+        #   
+        #   dev.off()
+        # }
+        
+       }
+      
+    
       
      
     }
