@@ -1,6 +1,6 @@
 # Celegans_sensingDyf1
 This repository contains code and data necessary to replicate analysis of Dyf1 C.elegans mutants and generates figures from A.Segref manuscript: 
- "Thermosensation is linked /coupled to ubiquitin-dependent protein turnover through insulin and calcineurin signaling"
+ "Thermosensation is linked to ubiquitin-dependent protein turnover via insulin and calcineurin signalling"
 
 * **dataAnalysisANDviz_dyf1_publication.r** <br />
 Code for replicating analysis and paper figures.
